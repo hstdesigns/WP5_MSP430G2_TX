@@ -6,7 +6,7 @@
 int incomingByte = 0;   // for incoming serial data
 
 const int rd =  10;      // the number of the LED pin
-const int gn =  19;      // the number of the LED pin
+const int gn =  18;      // the number of the LED pin
 const int bl =  12;      // the number of the LED pin
 
 const int ir =  11;      // the number of the LED pin
@@ -15,7 +15,7 @@ const int ir2 =  5;      // the number of the LED pin
 int analogPin = 2;
 int val = 0;
 
-Enrf24 radio(8, 9, 12);  // P2.0=CE, P2.1=CSN, P2.2=IRQ
+Enrf24 radio(8, 9, 13);  // P2.0=CE, P2.1=CSN, P2.2=IRQ
 const uint8_t txaddr[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0x01 };
 
 const char *str_on = "ON";
@@ -23,8 +23,112 @@ const char *str_off = "OFF";
 
 void dump_radio_status_to_serialport(uint8_t);
 
-void setup() {
+#define TEMP 0
+#define MVAL 1
+#define NVAL 2
+
+#define DEBUGLEVEL 1
+
+struct masterBootRecord {
+           /** Code Area for master boot program. */
+  uint8_t  codeArea[440];
+           /** Optional WindowsNT disk signature. May contain more boot code. */
+  uint32_t diskSignature;
+           /** Usually zero but may be more boot code. */
+  uint16_t usuallyZero;
+           /** First MBR signature byte. Must be 0X55 */
+  uint8_t  mbrSig0;
+           /** Second MBR signature byte. Must be 0XAA */
+  uint8_t  mbrSig1;
+};
+/** Type name for masterBootRecord */
+typedef struct masterBootRecord mbr_t;
+
+const float pcc24_base_val[][3]
+{
   
+     -2.971025641,	4.308043897,	        -22.26698376
+,6.19230769230769,	4.39836189253926,	-22.9277146126782
+,11.1161538461538,	4.43915619451586,	-22.9686787325047
+,16.1244871794872,	4.48561941795294,	-23.1641856752349
+,21.1671794871795,	4.52935982677534,	-23.1033558267446
+,25.8638461538462,	4.57257852802868,	-23.4376711220657
+,30.7515384615385,	4.61588841504755,	-23.6868599349341
+,35.4934615384615,	4.65824853625457,	-24.0810530809115
+,40.3941025641026,	4.70201216940864,	-24.3932906941516
+,45.2202564102564,	4.74650644794932,	-24.6804668350968
+,49.934358974359,	4.79042324307334,	-25.192815111471
+,54.9092307692308,	4.83565965771321,	-25.5807847291393
+,59.5867948717949,	4.87840473691108,	-25.9959635677649
+,64.1074358974359,	4.92125018380386,	-26.5745102400811
+,73.03051282,           5.037447619,            -29.52103867
+};
+
+struct Tmn_2_t
+{
+float T1;
+float T2;
+float m1;
+float m2;
+float n1;
+float n2;
+} Tmn_2;
+
+struct Tmn_2_t *ptr = &Tmn_2;
+
+void base_values(float T, struct Tmn_2_t *Tmn)
+{
+uint8_t i = 0;			//weniger als 256 verschiedene T Werte
+while(T < pcc24_base_val[i][TEMP])
+{
+	i++;
+}
+Tmn->T1 = pcc24_base_val[i][TEMP];
+Tmn->T2 = pcc24_base_val[i+1][TEMP];
+Tmn->m1 = pcc24_base_val[i][MVAL];
+Tmn->m2 = pcc24_base_val[i+1][MVAL];
+Tmn->n1 = pcc24_base_val[i][NVAL];
+Tmn->n2 = pcc24_base_val[i+1][NVAL];
+}
+
+void debugTable()
+{
+byte i = 0;			//weniger als 256 verschiedene T Werte
+while(i < 15)
+{
+Serial.print(pcc24_base_val[i][TEMP]);
+Serial.print(";");
+Serial.print(pcc24_base_val[i][MVAL]);
+Serial.print(";");
+Serial.println(pcc24_base_val[i][NVAL]);
+i++;
+}
+}
+
+float y_lin_interpol(float x, float x_1, float x_2, float y_1, float y_2)
+{
+return y_1 + (y_2 - y_1) / (x_2 - x_1) * (x - x_1);
+}
+
+float m,n;
+
+float calc_pressure(float T, float u)
+{
+    base_values(T, &Tmn_2);
+    m=y_lin_interpol(T, ptr->T1, ptr->T2, ptr->m1,ptr->m2);
+    n=y_lin_interpol(T, ptr->T1, ptr->T2, ptr->n1,ptr->n2);
+  
+//  m=y_lin_interpol(T, Tmn_2.T1, Tmn_2.T2, Tmn_2.m1,Tmn_2.m2);
+//  n=y_lin_interpol(T, Tmn_2.T1, Tmn_2.T2, Tmn_2.n1,Tmn_2.n2);
+  
+//  Serial.print(m);
+//  Serial.print(";");
+//  Serial.println(n);
+  
+  return m*u + n;
+}
+
+void setup() {  
   // put your setup code here, to run once:
   pinMode(rd, OUTPUT); 
   pinMode(gn, OUTPUT); 
@@ -51,41 +155,93 @@ void setup() {
   dump_radio_status_to_serialport(radio.radioState());
 
   radio.setTXaddress((void*)txaddr);
+  
+  P2DIR |= 0x40;                            // P1.2 = output
+  P2SEL |= 0x40;                            // P1.2 = TA1 output
+//  TACCR0 = 4096 - 1;                        // PWM Period
+//  TACCTL1 = OUTMOD_7;                       // TACCR1 reset/set
+//  TACCR1 = 2048;                             // TACCR1 PWM Duty Cycle
+//  TACTL = TASSEL_2 + MC_1;                  // SMCLK, upmode
+
+TA0CCTL1 = CM_0 | CCIS_0 | OUTMOD_7;
+TA0CTL = TASSEL_2 | ID_0 | MC_1;
+
+TA0CCR0 = 4096 - 1;
+
+TA0CCR1 = 2048;	//P2.6 gn
+
 }
 
+float mbar;
+
+void debugprint(char *msg){
+ if (DEBUGLEVEL > 0){
+   Serial.println(msg);
+} 
+}
+
+#define RFON 1
+
+word adcV=0;
+word adcTemp=0;
+float adcU=0;
+word pwmVal=0;
+float T;
+
 void loop() {
-  Serial.print("Sending packet: ");
-  radio.print(getADC());
+  
+  digitalWrite(rd, HIGH);
+  
+  if (RFON>0){
+  
+  //debugprint("Sending packet: ");
+  //Serial.print("Sending packet: ");
+  
+
+  adcV=getADC();
+  //radio.print(getADC());
+  //radio.print(0);
+  //radio.print(adcV);
   ADC10CTL0 |= REFON + REFOUT + REF2_5V;
   //radio.print(";");
   //radio.print(getVCC());
   //radio.print(";");
   //radio.println(getTemp());
-  radio.flush();  // Force transmit (don't wait for any more data)
-  dump_radio_status_to_serialport(radio.radioState());  // Should report IDLE
-  delay(1000);
+  //radio.flush();  // Force transmit (don't wait for any more data)
+  //dump_radio_status_to_serialport(radio.radioState());  // Should report IDLE
+  delay(100);
   
-  radio.print(getVCC());
+  //digitalWrite(rd, LOW);
+  adcTemp = getTemp();
+  //radio.print(adcTemp);
   ADC10CTL0 |= REFON + REFOUT + REF2_5V;
   //radio.print(";");
   //radio.print(getVCC());
   //radio.print(";");
   //radio.println(getTemp());
-  radio.flush();  // Force transmit (don't wait for any more data)
-  dump_radio_status_to_serialport(radio.radioState());  // Should report IDLE
-  delay(1000);
+  //radio.flush();  // Force transmit (don't wait for any more data)
+  //dump_radio_status_to_serialport(radio.radioState());  // Should report IDLE
+  delay(100);
   
-  radio.print(getTemp());
-  ADC10CTL0 |= REFON + REFOUT + REF2_5V;
-  //radio.print(";");
-  //radio.print(getVCC());
-  //radio.print(";");
-  //radio.println(getTemp());
-  radio.flush();  // Force transmit (don't wait for any more data)
-  dump_radio_status_to_serialport(radio.radioState());  // Should report IDLE
-  delay(1000);
+  T=calc_T(adcTemp);
+  adcU = calc_u(T, adcV);
+  mbar = calc_pressure(T, adcU);
+  pwmVal = calc_pwm(mbar);
   
-  delay(26900);
+  TA0CCR1 = pwmVal;
+  
+//  radio.print("T: "+round(T));
+//  radio.flush();
+//  
+//  radio.print("mbar: "+round(mbar));
+//  radio.flush();
+//  
+//  radio.print("pwmVal: "+pwmVal);
+//  radio.flush();
+  
+  //delay(26900);
+  delay(300);
+  }
   
             // send data only when you receive data:
         if (Serial.available() > 0) {
@@ -96,6 +252,26 @@ void loop() {
                  // say what you got:
                 Serial.print("I received: ");
                 Serial.println(incomingByte, DEC);
+                break;
+                
+                case '1':
+                  mbar = calc_pressure(0.1,196.0);
+                  Serial.println(mbar);
+                  mbar = calc_pressure(6.2,107.0);
+                  Serial.println(mbar);
+                  mbar = calc_pressure(62.7,168.0);
+                  Serial.println(mbar);
+                  mbar = calc_pressure(70.0,15.4);
+                  Serial.println(mbar);
+                break;
+                
+                case '2':
+                debugTable();
+                break;
+                
+                case '3':
+                  mbar = calc_pressure(4.0,40.0);
+                  Serial.println(mbar);
                 break;
                 
                 case 'r':
@@ -174,18 +350,59 @@ int getTemp(){
   return val;
 }
 
+const float adCcoeffA = (3600.0 /16384.0);
+const float adCoeffB = 1/(30.0 / 4.0);
+
 int getVCC(){
   int i=0;
   long val=0;
   
   while(i<256)
   {
-    val+=analogRead(INCH_11);
+    val+=analogRead(5);
     i++;
   }
   val/=16;
   
   return val;
+}
+
+float calc_u(float T, word adc_val)
+{
+  float temp = (adc_val) * adCcoeffA;				// ref / 16384;
+  
+  //temp-=-0.2199*T  + 191.2;
+  temp -= 140.769;
+  
+  return temp*adCoeffB;
+}
+
+const float tempCoeff = (2.5/16384.0)/0.00355*1.43;
+
+float calc_T(word tempVal){
+ return (tempVal*tempCoeff)-287.43; 
+}
+
+word calc_pwm(float mbar)
+{
+  word pwm_val = 228; //0 bar entspricht 200 mV
+  while(mbar > 0)
+  {
+    mbar -= 1;
+    pwm_val += 2;
+  }
+  return pwm_val;
+}
+
+word calc_pwmX(float mbar)
+{
+  word pwm_val = 228; //0 bar entspricht 200 mV
+  while(mbar > 0)
+  {
+    mbar -= 1;
+    pwm_val += 2;
+  }
+  return pwm_val;
 }
 
 void dump_radio_status_to_serialport(uint8_t status)
