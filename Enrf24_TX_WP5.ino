@@ -12,7 +12,8 @@ const int bl =  12;      // the number of the LED pin
 const int ir =  11;      // the number of the LED pin
 const int ir2 =  5;      // the number of the LED pin
 
-int analogPin = 2;
+const int analogOPV = 2;
+const int analogDAC = 5;
 int val = 0;
 
 Enrf24 radio(8, 9, 13);  // P2.0=CE, P2.1=CSN, P2.2=IRQ
@@ -44,9 +45,7 @@ struct masterBootRecord {
 /** Type name for masterBootRecord */
 typedef struct masterBootRecord mbr_t;
 
-const float pcc24_base_val[][3]
-{
-  
+const float pcc24_base_val[][3]{
      -2.971025641,	4.308043897,	        -22.26698376
 ,6.19230769230769,	4.39836189253926,	-22.9277146126782
 ,11.1161538461538,	4.43915619451586,	-22.9686787325047
@@ -64,59 +63,52 @@ const float pcc24_base_val[][3]
 ,73.03051282,           5.037447619,            -29.52103867
 };
 
-struct Tmn_2_t
-{
-float T1;
-float T2;
-float m1;
-float m2;
-float n1;
-float n2;
+struct Tmn_2_t{
+  float T1;
+  float T2;
+  float m1;
+  float m2;
+  float n1;
+  float n2;
 } Tmn_2;
 
 struct Tmn_2_t *ptr = &Tmn_2;
 
-void base_values(float T, struct Tmn_2_t *Tmn)
-{
-uint8_t i = 0;			//weniger als 256 verschiedene T Werte
-while(T < pcc24_base_val[i][TEMP])
-{
-	i++;
-}
-Tmn->T1 = pcc24_base_val[i][TEMP];
-Tmn->T2 = pcc24_base_val[i+1][TEMP];
-Tmn->m1 = pcc24_base_val[i][MVAL];
-Tmn->m2 = pcc24_base_val[i+1][MVAL];
-Tmn->n1 = pcc24_base_val[i][NVAL];
-Tmn->n2 = pcc24_base_val[i+1][NVAL];
+void base_values(float T, struct Tmn_2_t *Tmn){
+  uint8_t i = 0;			//weniger als 256 verschiedene T Werte
+  while(T < pcc24_base_val[i][TEMP]){
+    i++;
+  }
+  Tmn->T1 = pcc24_base_val[i][TEMP];
+  Tmn->T2 = pcc24_base_val[i+1][TEMP];
+  Tmn->m1 = pcc24_base_val[i][MVAL];
+  Tmn->m2 = pcc24_base_val[i+1][MVAL];
+  Tmn->n1 = pcc24_base_val[i][NVAL];
+  Tmn->n2 = pcc24_base_val[i+1][NVAL];
 }
 
-void debugTable()
-{
-byte i = 0;			//weniger als 256 verschiedene T Werte
-while(i < 15)
-{
-Serial.print(pcc24_base_val[i][TEMP]);
-Serial.print(";");
-Serial.print(pcc24_base_val[i][MVAL]);
-Serial.print(";");
-Serial.println(pcc24_base_val[i][NVAL]);
-i++;
-}
+void debugTable(){
+  byte i = 0;			//weniger als 256 verschiedene T Werte
+  while(i < 15){
+    Serial.print(pcc24_base_val[i][TEMP]);
+    Serial.print(";");
+    Serial.print(pcc24_base_val[i][MVAL]);
+    Serial.print(";");
+    Serial.println(pcc24_base_val[i][NVAL]);
+    i++;
+  }
 }
 
-float y_lin_interpol(float x, float x_1, float x_2, float y_1, float y_2)
-{
-return y_1 + (y_2 - y_1) / (x_2 - x_1) * (x - x_1);
+float y_lin_interpol(float x, float x_1, float x_2, float y_1, float y_2){
+  return y_1 + (y_2 - y_1) / (x_2 - x_1) * (x - x_1);
 }
 
 float m,n;
 
-float calc_pressure(float T, float u)
-{
-    base_values(T, &Tmn_2);
-    m=y_lin_interpol(T, ptr->T1, ptr->T2, ptr->m1,ptr->m2);
-    n=y_lin_interpol(T, ptr->T1, ptr->T2, ptr->n1,ptr->n2);
+float calc_pressure(float T, float u){
+  base_values(T, &Tmn_2);
+  m=y_lin_interpol(T, ptr->T1, ptr->T2, ptr->m1,ptr->m2);
+  n=y_lin_interpol(T, ptr->T1, ptr->T2, ptr->n1,ptr->n2);
   
 //  m=y_lin_interpol(T, Tmn_2.T1, Tmn_2.T2, Tmn_2.m1,Tmn_2.m2);
 //  n=y_lin_interpol(T, Tmn_2.T1, Tmn_2.T2, Tmn_2.n1,Tmn_2.n2);
@@ -128,8 +120,19 @@ float calc_pressure(float T, float u)
   return m*u + n;
 }
 
+void debugprint(char *msg){
+  if (DEBUGLEVEL > 0){
+    Serial.println(msg);
+  } 
+}
+
+// init procedure
+//--------------------------------------
 void setup() {  
-  // put your setup code here, to run once:
+  delay(500);  
+  
+  // GPIO Setup
+  //--------------------------------------
   pinMode(rd, OUTPUT); 
   pinMode(gn, OUTPUT); 
   //pinMode(bl, OUTPUT); 
@@ -142,11 +145,12 @@ void setup() {
   digitalWrite(ir, LOW);
   digitalWrite(ir2, LOW);
   
-  //analogReference(INTERNAL1V5);
-  ADC10CTL0= REFON + REFOUT + REF2_5V;
-  
+  // init uart with 9600,8,1
+  //--------------------------------------
   Serial.begin(9600);
 
+  // init NRF24L01+ funk module
+  //--------------------------------------
   SPI.begin();
   SPI.setDataMode(SPI_MODE0);
   SPI.setBitOrder(MSBFIRST);
@@ -156,94 +160,72 @@ void setup() {
 
   radio.setTXaddress((void*)txaddr);
   
-  P2DIR |= 0x40;                            // P1.2 = output
-  P2SEL |= 0x40;                            // P1.2 = TA1 output
-//  TACCR0 = 4096 - 1;                        // PWM Period
-//  TACCTL1 = OUTMOD_7;                       // TACCR1 reset/set
-//  TACCR1 = 2048;                             // TACCR1 PWM Duty Cycle
-//  TACTL = TASSEL_2 + MC_1;                  // SMCLK, upmode
+  // init PWM module
+  //--------------------------------------
+  P2DIR |= 0x40;  // output for PWM
+  P2SEL |= 0x40;  // gpio config for PWM output
 
-TA0CCTL1 = CM_0 | CCIS_0 | OUTMOD_7;
-TA0CTL = TASSEL_2 | ID_0 | MC_1;
+  TA0CCTL1 = CM_0 | CCIS_0 | OUTMOD_7;  // reset/set mode
+  TA0CTL = TASSEL_2 | ID_0 | MC_1;  // SMCLK, upmode
+  TA0CCR0 = 4096 - 1;  // 16MHz div 4096 = 3906Hz PWM Frequenz
 
-TA0CCR0 = 4096 - 1;
-
-TA0CCR1 = 2048;	//P2.6 gn
-
+  TA0CCR1 = 2048;  // init with 50% duty cycle
 }
 
-float mbar;
+word adcV = 0;
+word dacV = 0;
+word adcTemp = 0;
 
-void debugprint(char *msg){
- if (DEBUGLEVEL > 0){
-   Serial.println(msg);
-} 
-}
+float adcU = 0;
+word pwmVal = 0;
+float T = 0.0;
+float mbar = 0.0;
 
-#define RFON 1
-
-word adcV=0;
-word adcTemp=0;
-float adcU=0;
-word pwmVal=0;
-float T;
+#define RFON 1  // 1: enable, 0: disable NRF24L01 transmission
 
 void loop() {
   
-  digitalWrite(rd, HIGH);
-  
-  if (RFON>0){
-  
-  //debugprint("Sending packet: ");
-  //Serial.print("Sending packet: ");
-  
+  digitalWrite(rd, HIGH);  // enable red led  
 
-  adcV=getADC();
-  //radio.print(getADC());
-  //radio.print(0);
-  //radio.print(adcV);
   ADC10CTL0 |= REFON + REFOUT + REF2_5V;
-  //radio.print(";");
-  //radio.print(getVCC());
-  //radio.print(";");
-  //radio.println(getTemp());
-  //radio.flush();  // Force transmit (don't wait for any more data)
-  //dump_radio_status_to_serialport(radio.radioState());  // Should report IDLE
-  delay(100);
+  delay(1);
+  adcV = getADC();  
   
-  //digitalWrite(rd, LOW);
+  ADC10CTL0 |= REFON + REFOUT + REF2_5V;
+  delay(1);
+  dacV = getVCC();
+  
+  ADC10CTL0 |= REFON + REFOUT + REF2_5V;
+  delay(1);
   adcTemp = getTemp();
-  //radio.print(adcTemp);
+  
   ADC10CTL0 |= REFON + REFOUT + REF2_5V;
-  //radio.print(";");
-  //radio.print(getVCC());
-  //radio.print(";");
-  //radio.println(getTemp());
-  //radio.flush();  // Force transmit (don't wait for any more data)
-  //dump_radio_status_to_serialport(radio.radioState());  // Should report IDLE
-  delay(100);
+  delay(1);
   
-  T=calc_T(adcTemp);
-  adcU = calc_u(T, adcV);
-  mbar = calc_pressure(T, adcU);
-  pwmVal = calc_pwm(mbar);
+  T=calc_T(adcTemp);  // count to temperature incl compensation
+  adcU = calc_u(T, adcV);  // convert adc counts to mV --> currently without compensation
+  mbar = calc_pressure(T, adcU);  // get mbar value 
+  pwmVal = calc_pwm(mbar);  // convert analog to adc counts
   
-  TA0CCR1 = pwmVal;
+  TA0CCR1 = pwmVal;  // set dac value 0...3.6V
   
-//  radio.print("T: "+round(T));
-//  radio.flush();
-//  
-//  radio.print("mbar: "+round(mbar));
-//  radio.flush();
-//  
-//  radio.print("pwmVal: "+pwmVal);
-//  radio.flush();
+  if (RFON>0){  
+    //debugprint("Sending packet: ");
+    //Serial.print("Sending packet: ");
   
-  //delay(26900);
-  delay(300);
+    radio.print(adcV);
+    radio.print(";");
+    radio.print(dacV);
+    radio.print(";");
+    radio.print(adcTemp);
+    radio.flush();
+    
+    delay(100);
+  
+    //dump_radio_status_to_serialport(radio.radioState());  // Should report IDLE
   }
   
-            // send data only when you receive data:
+        // send data only when you receive data:
         if (Serial.available() > 0) {
                 // read the incoming byte:
                 incomingByte = Serial.read();
@@ -312,13 +294,10 @@ void loop() {
                 Serial.print(getVCC());
                 Serial.print(";");
                 Serial.println(getTemp());
-                break;
-                
-                }
-                
-                //val = analogRead(analogPin);    // read the input pin
-                //Serial.println(getADC());             // debug value
-                
+                break;                
+                }                
+                //val = analogRead(analogOPV);    // read the input pin
+                //Serial.println(getADC());             // debug value                
         }
 }
 
@@ -328,11 +307,23 @@ int getADC(){
   
   while(i<256)
   {
-    val+=analogRead(analogPin);
+    val+=analogRead(analogOPV);
     i++;
   }
-  val/=16;
+  val/=16;  
+  return val;
+}
+
+int getVCC(){
+  int i=0;
+  long val=0;
   
+  while(i<256)
+  {
+    val+=analogRead(analogDAC);
+    i++;
+  }
+  val/=16;  
   return val;
 }
 
@@ -345,31 +336,15 @@ int getTemp(){
     val+=analogRead(TEMPSENSOR);
     i++;
   }
-  val/=16;
-  
+  val/=16;  
   return val;
 }
 
 const float adCcoeffA = (3600.0 /16384.0);
 const float adCoeffB = 1/(30.0 / 4.0);
 
-int getVCC(){
-  int i=0;
-  long val=0;
-  
-  while(i<256)
-  {
-    val+=analogRead(5);
-    i++;
-  }
-  val/=16;
-  
-  return val;
-}
-
-float calc_u(float T, word adc_val)
-{
-  float temp = (adc_val) * adCcoeffA;				// ref / 16384;
+float calc_u(float T, word adc_val){
+  float temp = (adc_val) * adCcoeffA;  // ref / 16384;
   
   //temp-=-0.2199*T  + 191.2;
   temp -= 140.769;
@@ -383,8 +358,7 @@ float calc_T(word tempVal){
  return (tempVal*tempCoeff)-287.43; 
 }
 
-word calc_pwm(float mbar)
-{
+word calc_pwm(float mbar){
   word pwm_val = 228; //0 bar entspricht 200 mV
   while(mbar > 0)
   {
@@ -394,8 +368,7 @@ word calc_pwm(float mbar)
   return pwm_val;
 }
 
-word calc_pwmX(float mbar)
-{
+word calc_pwmX(float mbar){
   word pwm_val = 228; //0 bar entspricht 200 mV
   while(mbar > 0)
   {
@@ -405,8 +378,7 @@ word calc_pwmX(float mbar)
   return pwm_val;
 }
 
-void dump_radio_status_to_serialport(uint8_t status)
-{
+void dump_radio_status_to_serialport(uint8_t status){
   Serial.print("Enrf24 radio transceiver status: ");
   switch (status) {
     case ENRF24_STATE_NOTPRESENT:
@@ -433,3 +405,4 @@ void dump_radio_status_to_serialport(uint8_t status)
       Serial.println("UNKNOWN STATUS CODE");
   }
 }
+
