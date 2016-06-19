@@ -45,6 +45,20 @@ struct masterBootRecord {
 /** Type name for masterBootRecord */
 typedef struct masterBootRecord mbr_t;
 
+// f(x,y) = p00 + p10*x + p01*y + p20*x^2 + p11*x*y + p02*y^2
+
+const float p00 =      -21.87;  // (-22.2, -21.53)
+const float p10 =    -0.04634;  // (-0.06036, -0.03231)
+const float p01 =       4.326;  // (4.321, 4.331)
+const float p20 =  -0.0002811;  // (-0.0004589, -0.0001033)
+const float p11 =    0.009101;  // (0.009047, 0.009154)
+const float p02 =   5.385e-05;  // (3.428e-05, 7.343e-05)
+
+float calcPressureComp(float T, float mV){
+  float mbar=p00 + p10*T + p01*mV + p20*T*T + p11*T*mV + p02*mV*mV;
+  return mbar;
+}
+
 const float pcc24_base_val[][3]{
      -2.971025641,	4.308043897,	        -22.26698376
 ,6.19230769230769,	4.39836189253926,	-22.9277146126782
@@ -181,6 +195,9 @@ word pwmVal = 0;
 float T = 0.0;
 float mbar = 0.0;
 
+const int adcOPVoffset = -1640;
+const int adcOPVslew = 20.0/116.0;
+
 #define RFON 1  // 1: enable, 0: disable NRF24L01 transmission
 
 void loop() {
@@ -203,11 +220,14 @@ void loop() {
   delay(1);
   
   T=calc_T(adcTemp);  // count to temperature incl compensation
-  adcU = calc_u(T, adcV);  // convert adc counts to mV --> currently without compensation
-  mbar = calc_pressure(T, adcU);  // get mbar value 
+  adcU = calc_u(T, (adcV));  // convert adc counts to mV --> currently without compensation
+  
+  adcU -= 0;
+  //mbar = calc_pressure(T, adcU);  // get mbar value 
+  mbar = calcPressureComp(T, adcU);  // get mbar value 
   pwmVal = calc_pwm(mbar);  // convert analog to adc counts
   
-  TA0CCR1 = pwmVal;  // set dac value 0...3.6V
+  TA0CCR1 = pwmVal;  // set dac value 0...3600mV
   
   if (RFON>0){  
     //debugprint("Sending packet: ");
@@ -215,9 +235,11 @@ void loop() {
   
     radio.print(adcV);
     radio.print(";");
-    radio.print(dacV);
+    radio.print(adcU);
     radio.print(";");
     radio.print(adcTemp);
+    radio.print(";");
+    radio.print(mbar);
     radio.flush();
     
     delay(100);
@@ -340,35 +362,25 @@ int getTemp(){
   return val;
 }
 
-const float adCcoeffA = (3600.0 /16384.0);
-const float adCoeffB = 1/(30.0 / 4.0);
+const float adCcoeffA = 2500.0/16384.0;
+const float adCoeffB = 1.0/30.0/4.0;
 
-float calc_u(float T, word adc_val){
-  float temp = (adc_val) * adCcoeffA;  // ref / 16384;
+float calc_u(float T, int adc_val){
+  float temp = adc_val * adCcoeffA;
   
   //temp-=-0.2199*T  + 191.2;
-  temp -= 140.769;
-  
-  return temp*adCoeffB;
+  //temp -= 140.769;
+  return temp/5.4-42.05;
+  //return temp*adCoeffB;
 }
 
 const float tempCoeff = (2.5/16384.0)/0.00355*1.43;
 
 float calc_T(word tempVal){
- return (tempVal*tempCoeff)-287.43; 
+  return (tempVal*tempCoeff)-287.43; 
 }
 
 word calc_pwm(float mbar){
-  word pwm_val = 228; //0 bar entspricht 200 mV
-  while(mbar > 0)
-  {
-    mbar -= 1;
-    pwm_val += 2;
-  }
-  return pwm_val;
-}
-
-word calc_pwmX(float mbar){
   word pwm_val = 228; //0 bar entspricht 200 mV
   while(mbar > 0)
   {
